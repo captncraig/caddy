@@ -1,0 +1,96 @@
+{
+	"comment": "",
+	"ignore": "test",
+	"package": [
+		{
+			"path": "github.com/BurntSushi/toml",
+			"revision": "056c9bc7be7190eaa7715723883caffa5f8fa3e4",
+			"revisionTime": "2015-05-01T06:40:42-04:00"
+		},
+		{
+			"path": "github.com/dustin/go-humanize",
+			"revision": "64dbdae0d393b7d71480a6dace78456396b55286",
+			"revisionTime": "2015-11-08T23:12:45-08:00"
+		},
+		{
+			"path": "github.com/flynn/go-shlex",
+			"revision": "3f9db97f856818214da2e1057f8ad84803971cff",
+			"revisionTime": "2015-05-15T10:53:56-04:00"
+		},
+		{
+			"path": "github.com/gorilla/websocket",
+			"revision": "361d4c0ffd78338ebe0a9e6320cdbe115d7dc026",
+			"revisionTime": "2015-11-02T11:10:34-08:00"
+		},
+		{
+			"path": "github.com/hashicorp/go-syslog",
+			"revision": "42a2b573b664dbf281bd48c3cc12c086b17a39ba",
+			"revisionTime": "2015-02-18T13:19:46-05:00"
+		},
+		{
+			"path": "github.com/jimstudt/http-authentication/basic",
+			"revision": "3eca13d6893afd7ecabe15f4445f5d2872a1b012",
+			"revisionTime": "2014-04-01T15:37:05-05:00"
+		},
+		{
+			"path": "github.com/letsencrypt/go-jose",
+			"revision": "e7bd87a386998d423741e8e370af1a22638767e0",
+			"revisionTime": "2015-07-30T13:44:01-04:00"
+		},
+		{
+			"path": "github.com/russross/blackfriday",
+			"revision": "0b647d0506a698cca42caca173e55559b12a69f2",
+			"revisionTime": "2015-11-09T21:18:55-08:00"
+		},
+		{
+			"path": "github.com/shurcooL/sanitized_anchor_name",
+			"revision": "10ef21a441db47d8b13ebcc5fd2310f636973c77",
+			"revisionTime": "2015-10-27T17:19:15-07:00"
+		},
+		{
+			"path": "github.com/square/go-jose/cipher",
+			"revision": "0f7a5126e23afc8d290d0c501873c6416c693d47",
+			"revisionTime": "2015-11-02T12:07:53-08:00"
+		},
+		{
+			"path": "github.com/xenolf/lego/acme",
+			"revision": "71d0e8db6f778676d15c29368301ef195209ff7c",
+			"revisionTime": "2015-11-03T12:13:20-07:00"
+		},
+		{
+			"path": "golang.org/x/crypto/ocsp",
+			"revision": "575fdbe86e5dd89229707ebec0575ce7d088a4a6",
+			"revisionTime": "2015-10-30T09:56:38-07:00"
+		},
+		{
+			"path": "golang.org/x/crypto/sha3",
+			"revision": "575fdbe86e5dd89229707ebec0575ce7d088a4a6",
+			"revisionTime": "2015-10-30T09:56:38-07:00"
+		},
+		{
+			"path": "golang.org/x/net/http2",
+			"revision": "b4e17d61b15679caf2335da776c614169a1b4643",
+			"revisionTime": "2015-10-28T13:07:21+01:00"
+		},
+		{
+			"path": "golang.org/x/net/http2/hpack",
+			"revision": "b4e17d61b15679caf2335da776c614169a1b4643",
+			"revisionTime": "2015-10-28T13:07:21+01:00"
+		},
+		{
+			"path": "golang.org/x/net/websocket",
+			"revision": "b4e17d61b15679caf2335da776c614169a1b4643",
+			"revisionTime": "2015-10-28T13:07:21+01:00"
+		},
+		{
+			"path": "gopkg.in/natefinch/lumberjack.v2",
+			"revision": "600ceb4523e5b7ff745f91083c8a023c2bf73af5",
+			"revisionTime": "2015-10-12T21:44:48-04:00"
+		},
+		{
+			"path": "gopkg.in/yaml.v2",
+			"revision": "53feefa2559fb8dfa8d81baad31be332c97d6c77",
+			"revisionTime": "2015-09-24T11:23:14-03:00"
+		}
+	]
+}

@@ -23,6 +23,11 @@
 			"revisionTime": "2016-01-22T16:46:18-07:00"
 		},
 		{
+			"path": "github.com/captncraig/caddy-stats",
+			"revision": "bd1578792a4e101da1a712934c7af3e9c918a199",
+			"revisionTime": "2016-02-05T23:08:27-07:00"
+		},
+		{
 			"path": "github.com/crackcomm/cloudflare",
 			"revision": "d872e84a393cdd91b2314c61b3fbefc2aa66927b",
 			"revisionTime": "2015-12-27T15:09:42+01:00"
@@ -48,6 +53,21 @@
 			"revisionTime": "2015-02-18T13:19:46-05:00"
 		},
 		{
+			"path": "github.com/influxdata/influxdb/client/v2",
+			"revision": "b635e516e59bdab46327976f639046b90f3677df",
+			"revisionTime": "2016-02-04T13:47:51-07:00"
+		},
+		{
+			"path": "github.com/influxdb/influxdb/models",
+			"revision": "b635e516e59bdab46327976f639046b90f3677df",
+			"revisionTime": "2016-02-04T13:47:51-07:00"
+		},
+		{
+			"path": "github.com/influxdb/influxdb/pkg/escape",
+			"revision": "b635e516e59bdab46327976f639046b90f3677df",
+			"revisionTime": "2016-02-04T13:47:51-07:00"
+		},
+		{
 			"path": "github.com/jimstudt/http-authentication/basic",
 			"revision": "3eca13d6893afd7ecabe15f4445f5d2872a1b012",
 			"revisionTime": "2014-04-01T15:37:05-05:00"
@@ -66,6 +86,11 @@
 			"path": "github.com/mitchellh/goamz/route53",
 			"revision": "caaaea8b30ee15616494ee68abd5d8ebbbef05cf",
 			"revisionTime": "2015-03-17T10:43:35-07:00"
+		},
+		{
+			"path": "github.com/rcrowley/go-metrics",
+			"revision": "7839c01b09d2b1d7068034e5fe6e423f6ac5be22",
+			"revisionTime": "2015-11-29T16:13:40-08:00"
 		},
 		{
 			"path": "github.com/russross/blackfriday",

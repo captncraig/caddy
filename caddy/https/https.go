@@ -1,7 +1,8 @@
-// Package letsencrypt integrates Let's Encrypt functionality into Caddy
-// with first-class support for creating and renewing certificates
-// automatically. It is designed to configure sites for HTTPS by default.
-package letsencrypt
+// Package https facilitates the management of TLS assets and integrates
+// Let's Encrypt functionality into Caddy with first-class support for
+// creating and renewing certificates automatically. It is designed to
+// configure sites for HTTPS by default.
+package https
 
 import (
 	"encoding/json"
@@ -13,9 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"golang.org/x/crypto/ocsp"
-
-	"github.com/mholt/caddy/caddy/setup"
 	"github.com/mholt/caddy/middleware"
 	"github.com/mholt/caddy/middleware/redirect"
 	"github.com/mholt/caddy/server"
@@ -37,34 +35,27 @@ import (
 //
 // Also note that calling this function activates asset
 // management automatically, which keeps certificates
-// renewed and OCSP stapling updated. This has the effect
-// of causing restarts when assets are updated.
+// renewed and OCSP stapling updated.
 //
 // Activate returns the updated list of configs, since
 // some may have been appended, for example, to redirect
 // plaintext HTTP requests to their HTTPS counterpart.
-// This function only appends; it does not prepend or splice.
+// This function only appends; it does not splice.
 func Activate(configs []server.Config) ([]server.Config, error) {
 	// just in case previous caller forgot...
 	Deactivate()
-
-	// reset cached ocsp from any previous activations
-	ocspCache = make(map[*[]byte]*ocsp.Response)
 
 	// pre-screen each config and earmark the ones that qualify for managed TLS
 	MarkQualified(configs)
 
 	// place certificates and keys on disk
-	err := ObtainCerts(configs, "")
+	err := ObtainCerts(configs, true, false)
 	if err != nil {
 		return configs, err
 	}
 
 	// update TLS configurations
-	EnableTLS(configs)
-
-	// enable OCSP stapling (this affects all TLS-enabled configs)
-	err = StapleOCSP(configs)
+	err = EnableTLS(configs, true)
 	if err != nil {
 		return configs, err
 	}
@@ -77,10 +68,13 @@ func Activate(configs []server.Config) ([]server.Config, error) {
 	// the renewal ticker is reset, so if restarts happen more often than
 	// the ticker interval, renewals would never happen. but doing
 	// it right away at start guarantees that renewals aren't missed.
-	renewCertificates(configs, false)
+	err = renewManagedCertificates(true)
+	if err != nil {
+		return configs, err
+	}
 
 	// keep certificates renewed and OCSP stapling updated
-	go maintainAssets(configs, stopChan)
+	go maintainAssets(stopChan)
 
 	return configs, nil
 }
@@ -101,7 +95,7 @@ func Deactivate() (err error) {
 }
 
 // MarkQualified scans each config and, if it qualifies for managed
-// TLS, it sets the Marked field of the TLSConfig to true.
+// TLS, it sets the Managed field of the TLSConfig to true.
 func MarkQualified(configs []server.Config) {
 	for i := 0; i < len(configs); i++ {
 		if ConfigQualifies(configs[i]) {
@@ -110,58 +104,47 @@ func MarkQualified(configs []server.Config) {
 	}
 }
 
-// ObtainCerts obtains certificates for all these configs as long as a certificate does not
-// already exist on disk. It does not modify the configs at all; it only obtains and stores
-// certificates and keys to the disk.
-func ObtainCerts(configs []server.Config, altPort string) error {
-	groupedConfigs := groupConfigsByEmail(configs, altPort != "") // don't prompt user if server already running
+// ObtainCerts obtains certificates for all these configs as long as a
+// certificate does not already exist on disk. It does not modify the
+// configs at all; it only obtains and stores certificates and keys to
+// the disk. If allowPrompts is true, the user may be shown a prompt.
+// If proxyACME is true, the ACME challenges will be proxied to our alt port.
+func ObtainCerts(configs []server.Config, allowPrompts, proxyACME bool) error {
+	// We group configs by email so we don't make the same clients over and
+	// over. This has the potential to prompt the user for an email, but we
+	// prevent that by assuming that if we already have a listener that can
+	// proxy ACME challenge requests, then the server is already running and
+	// the operator is no longer present.
+	groupedConfigs := groupConfigsByEmail(configs, allowPrompts)
 
 	for email, group := range groupedConfigs {
-		client, err := newClientPort(email, altPort)
+		client, err := NewACMEClient(email, allowPrompts)
 		if err != nil {
 			return errors.New("error creating client: " + err.Error())
 		}
 
 		for _, cfg := range group {
-			if existingCertAndKey(cfg.Host) {
+			if cfg.Host == "" || existingCertAndKey(cfg.Host) {
 				continue
 			}
 
-		Obtain:
-			certificate, failures := client.ObtainCertificate([]string{cfg.Host}, true, nil)
-			if len(failures) == 0 {
-				// Success - immediately save the certificate resource
-				err := saveCertResource(certificate)
-				if err != nil {
-					return errors.New("error saving assets for " + cfg.Host + ": " + err.Error())
-				}
+			// c.Configure assumes that allowPrompts == !proxyACME,
+			// but that's not always true. For example, a restart where
+			// the user isn't present and we're not listening on port 80.
+			// TODO: This could probably be refactored better.
+			if proxyACME {
+				client.SetHTTPAddress(net.JoinHostPort(cfg.BindHost, AlternatePort))
+				client.SetTLSAddress(net.JoinHostPort(cfg.BindHost, AlternatePort))
+				client.ExcludeChallenges([]acme.Challenge{acme.TLSSNI01, acme.DNS01})
 			} else {
-				// Error - either try to fix it or report them it to the user and abort
-				var errMsg string             // we'll combine all the failures into a single error message
-				var promptedForAgreement bool // only prompt user for agreement at most once
+				client.SetHTTPAddress(net.JoinHostPort(cfg.BindHost, ""))
+				client.SetTLSAddress(net.JoinHostPort(cfg.BindHost, ""))
+				client.ExcludeChallenges([]acme.Challenge{acme.DNS01})
+			}
 
-				for errDomain, obtainErr := range failures {
-					// TODO: Double-check, will obtainErr ever be nil?
-					if tosErr, ok := obtainErr.(acme.TOSError); ok {
-						// Terms of Service agreement error; we can probably deal with this
-						if !Agreed && !promptedForAgreement && altPort == "" { // don't prompt if server is already running
-							Agreed = promptUserAgreement(tosErr.Detail, true) // TODO: Use latest URL
-							promptedForAgreement = true
-						}
-						if Agreed || altPort != "" {
-							err := client.AgreeToTOS()
-							if err != nil {
-								return errors.New("error agreeing to updated terms: " + err.Error())
-							}
-							goto Obtain
-						}
-					}
-
-					// If user did not agree or it was any other kind of error, just append to the list of errors
-					errMsg += "[" + errDomain + "] failed to get certificate: " + obtainErr.Error() + "\n"
-				}
-
-				return errors.New(errMsg)
+			err := client.Obtain([]string{cfg.Host})
+			if err != nil {
+				return err
 			}
 		}
 	}
@@ -169,17 +152,17 @@ func ObtainCerts(configs []server.Config, altPort string) error {
 	return nil
 }
 
-// groupConfigsByEmail groups configs by the email address to be used by its
-// ACME client. It only includes configs that are marked as fully managed.
-// This is the function that may prompt for an email address, unless skipPrompt
-// is true, in which case it will assume an empty email address.
-func groupConfigsByEmail(configs []server.Config, skipPrompt bool) map[string][]server.Config {
+// groupConfigsByEmail groups configs by the email address to be used by an
+// ACME client. It only groups configs that have TLS enabled and that are
+// marked as Managed. If userPresent is true, the operator MAY be prompted
+// for an email address.
+func groupConfigsByEmail(configs []server.Config, userPresent bool) map[string][]server.Config {
 	initMap := make(map[string][]server.Config)
 	for _, cfg := range configs {
 		if !cfg.TLS.Managed {
 			continue
 		}
-		leEmail := getEmail(cfg, skipPrompt)
+		leEmail := getEmail(cfg, userPresent)
 		initMap[leEmail] = append(initMap[leEmail], cfg)
 	}
 	return initMap
@@ -187,48 +170,24 @@ func groupConfigsByEmail(configs []server.Config, skipPrompt bool) map[string][]
 
 // EnableTLS configures each config to use TLS according to default settings.
 // It will only change configs that are marked as managed, and assumes that
-// certificates and keys are already on disk.
-func EnableTLS(configs []server.Config) {
+// certificates and keys are already on disk. If loadCertificates is true,
+// the certificates will be loaded from disk into the cache for this process
+// to use. If false, TLS will still be enabled and configured with default
+// settings, but no certificates will be parsed loaded into the cache, and
+// the returned error value will always be nil.
+func EnableTLS(configs []server.Config, loadCertificates bool) error {
 	for i := 0; i < len(configs); i++ {
 		if !configs[i].TLS.Managed {
 			continue
 		}
 		configs[i].TLS.Enabled = true
-		configs[i].TLS.Certificate = storage.SiteCertFile(configs[i].Host)
-		configs[i].TLS.Key = storage.SiteKeyFile(configs[i].Host)
-		setup.SetDefaultTLSParams(&configs[i])
-	}
-}
-
-// StapleOCSP staples OCSP responses to each config according to their certificate.
-// This should work for any TLS-enabled config, not just Let's Encrypt ones.
-func StapleOCSP(configs []server.Config) error {
-	for i := 0; i < len(configs); i++ {
-		if configs[i].TLS.Certificate == "" {
-			continue
-		}
-
-		bundleBytes, err := ioutil.ReadFile(configs[i].TLS.Certificate)
-		if err != nil {
-			return errors.New("load certificate to staple ocsp: " + err.Error())
-		}
-
-		ocspBytes, ocspResp, err := acme.GetOCSPForCert(bundleBytes)
-		if err == nil {
-			// TODO: We ignore the error if it exists because some certificates
-			// may not have an issuer URL which we should ignore anyway, and
-			// sometimes we get syntax errors in the responses. To reproduce this
-			// behavior, start Caddy with an empty Caddyfile and -log stderr. Then
-			// add a host to the Caddyfile which requires a new LE certificate.
-			// Reload Caddy's config with SIGUSR1, and see the log report that it
-			// obtains the certificate, but then an error:
-			// getting ocsp: asn1: syntax error: sequence truncated
-			// But retrying the reload again sometimes solves the problem. It's flaky...
-			ocspCache[&bundleBytes] = ocspResp
-			if ocspResp.Status == ocsp.Good {
-				configs[i].TLS.OCSPStaple = ocspBytes
+		if loadCertificates && configs[i].Host != "" {
+			_, err := cacheManagedCertificate(configs[i].Host, false)
+			if err != nil {
+				return err
 			}
 		}
+		setDefaultTLSParams(&configs[i])
 	}
 	return nil
 }
@@ -256,7 +215,7 @@ func hostHasOtherPort(allConfigs []server.Config, thisConfigIdx int, otherPort s
 // all configs.
 func MakePlaintextRedirects(allConfigs []server.Config) []server.Config {
 	for i, cfg := range allConfigs {
-		if cfg.TLS.Managed &&
+		if (cfg.TLS.Managed || cfg.TLS.OnDemand) &&
 			!hostHasOtherPort(allConfigs, i, "80") &&
 			(cfg.Port == "443" || !hostHasOtherPort(allConfigs, i, "443")) {
 			allConfigs = append(allConfigs, redirPlaintextHost(cfg))
@@ -266,15 +225,15 @@ func MakePlaintextRedirects(allConfigs []server.Config) []server.Config {
 }
 
 // ConfigQualifies returns true if cfg qualifies for
-// fully managed TLS. It does NOT check to see if a
+// fully managed TLS (but not on-demand TLS, which is
+// not considered here). It does NOT check to see if a
 // cert and key already exist for the config. If the
 // config does qualify, you should set cfg.TLS.Managed
-// to true and use that instead, because the process of
+// to true and check that instead, because the process of
 // setting up the config may make it look like it
 // doesn't qualify even though it originally did.
 func ConfigQualifies(cfg server.Config) bool {
-	return cfg.TLS.Certificate == "" && // user could provide their own cert and key
-		cfg.TLS.Key == "" &&
+	return !cfg.TLS.Manual && // user can provide own cert and key
 
 		// user can force-disable automatic HTTPS for this host
 		cfg.Scheme != "http" &&
@@ -287,7 +246,7 @@ func ConfigQualifies(cfg server.Config) bool {
 
 // HostQualifies returns true if the hostname alone
 // appears eligible for automatic HTTPS. For example,
-// localhost, empty hostname, and wildcard hosts are
+// localhost, empty hostname, and IP addresses are
 // not eligible because we cannot obtain certificates
 // for those names.
 func HostQualifies(hostname string) bool {
@@ -315,71 +274,6 @@ func existingCertAndKey(host string) bool {
 		return false
 	}
 	return true
-}
-
-// newClient creates a new ACME client to facilitate communication
-// with the Let's Encrypt CA server on behalf of the user specified
-// by leEmail. As part of this process, a user will be loaded from
-// disk (if already exists) or created new and registered via ACME
-// and saved to the file system for next time.
-func newClient(leEmail string) (*acme.Client, error) {
-	return newClientPort(leEmail, "")
-}
-
-// newClientPort does the same thing as newClient, except it creates a
-// new client with a custom port used for ACME transactions instead of
-// the default port. This is important if the default port is already in
-// use or is not exposed to the public, etc.
-func newClientPort(leEmail, port string) (*acme.Client, error) {
-	// Look up or create the LE user account
-	leUser, err := getUser(leEmail)
-	if err != nil {
-		return nil, err
-	}
-
-	// The client facilitates our communication with the CA server.
-	client, err := acme.NewClient(CAUrl, &leUser, rsaKeySizeToUse)
-	if err != nil {
-		return nil, err
-	}
-	if port != "" {
-		client.SetHTTPAddress(":" + port)
-		client.SetTLSAddress(":" + port)
-	}
-	client.ExcludeChallenges([]acme.Challenge{acme.TLSSNI01, acme.DNS01}) // We can only guarantee http-01 at this time, but tls-01 should work if port is not custom!
-
-	// If not registered, the user must register an account with the CA
-	// and agree to terms
-	if leUser.Registration == nil {
-		reg, err := client.Register()
-		if err != nil {
-			return nil, errors.New("registration error: " + err.Error())
-		}
-		leUser.Registration = reg
-
-		if port == "" { // can't prompt a user who isn't there
-			if !Agreed && reg.TosURL == "" {
-				Agreed = promptUserAgreement(saURL, false) // TODO - latest URL
-			}
-			if !Agreed && reg.TosURL == "" {
-				return nil, errors.New("user must agree to terms")
-			}
-		}
-
-		err = client.AgreeToTOS()
-		if err != nil {
-			saveUser(leUser) // TODO: Might as well try, right? Error check?
-			return nil, errors.New("error agreeing to terms: " + err.Error())
-		}
-
-		// save user to the file system
-		err = saveUser(leUser)
-		if err != nil {
-			return nil, errors.New("could not save user: " + err.Error())
-		}
-	}
-
-	return client, nil
 }
 
 // saveCertResource saves the certificate resource to disk. This
@@ -421,7 +315,7 @@ func saveCertResource(cert acme.CertificateResource) error {
 // be the HTTPS configuration. The returned configuration is set
 // to listen on port 80.
 func redirPlaintextHost(cfg server.Config) server.Config {
-	toURL := "https://" + cfg.Host
+	toURL := "https://{host}" // serve any host, since cfg.Host could be empty
 	if cfg.Port != "443" && cfg.Port != "80" {
 		toURL += ":" + cfg.Port
 	}
@@ -442,7 +336,7 @@ func redirPlaintextHost(cfg server.Config) server.Config {
 		BindHost: cfg.BindHost,
 		Port:     "80",
 		Middleware: map[string][]middleware.Middleware{
-			"/": []middleware.Middleware{redirMidware},
+			"/": {redirMidware},
 		},
 	}
 }
@@ -453,12 +347,12 @@ func Revoke(host string) error {
 		return errors.New("no certificate and key for " + host)
 	}
 
-	email := getEmail(server.Config{Host: host}, false)
+	email := getEmail(server.Config{Host: host}, true)
 	if email == "" {
 		return errors.New("email is required to revoke")
 	}
 
-	client, err := newClient(email)
+	client, err := NewACMEClient(email, true)
 	if err != nil {
 		return err
 	}
@@ -502,7 +396,7 @@ const (
 	AlternatePort = "5033"
 
 	// RenewInterval is how often to check certificates for renewal.
-	RenewInterval = 24 * time.Hour
+	RenewInterval = 6 * time.Hour
 
 	// OCSPInterval is how often to check if OCSP stapling needs updating.
 	OCSPInterval = 1 * time.Hour
@@ -527,8 +421,3 @@ var rsaKeySizeToUse = Rsa2048
 // stopChan is used to signal the maintenance goroutine
 // to terminate.
 var stopChan chan struct{}
-
-// ocspCache maps certificate bundle to OCSP response.
-// It is used during regular OCSP checks to see if the OCSP
-// response needs to be updated.
-var ocspCache = make(map[*[]byte]*ocsp.Response)

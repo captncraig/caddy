@@ -354,3 +354,7 @@ var certExpirationGauge = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 	Name: "caddy_certificate_expiration",
 	Help: "Unix timestamp of certificate expiration",
 }, []string{"name"})
+
+func init() {
+	prometheus.MustRegister(certExpirationGauge)
+}

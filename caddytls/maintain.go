@@ -23,6 +23,7 @@ import (
 
 	"github.com/mholt/caddy"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"golang.org/x/crypto/ocsp"
 )
 
@@ -92,6 +93,8 @@ func RenewManagedCertificates(allowPrompts bool) (err error) {
 
 	certCacheMu.RLock()
 	for name, cert := range certCache {
+		certExpirationGauge.WithLabelValues(name).Set(float64(cert.NotAfter.UTC().Unix()))
+
 		if !cert.Config.Managed || cert.Config.SelfSigned {
 			continue
 		}
@@ -347,3 +350,7 @@ func freshOCSP(resp *ocsp.Response) bool {
 }
 
 var ocspFolder = filepath.Join(caddy.AssetsPath(), "ocsp")
+var certExpirationGauge = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	Name: "caddy_certificate_expiration",
+	Help: "Unix timestamp of certificate expiration",
+}, []string{"name"})
